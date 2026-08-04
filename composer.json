@@ -1,0 +1,29 @@
+{
+  "name": "bestdecoders/edd-paddle-gateway",
+  "description": "Free Paddle Billing gateway for Easy Digital Downloads. Accept one-time payments via off-site redirect checkout.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "keywords": ["edd", "easy-digital-downloads", "paddle", "payment-gateway", "wordpress"],
+  "homepage": "https://wordpress.org/plugins/edd-paddle-gateway/",
+  "authors": [
+    {
+      "name": "bestdecoders",
+      "homepage": "https://bestdecoders.com/"
+    }
+  ],
+  "require-dev": {
+    "phpunit/phpunit": "^9.5",
+    "brain/monkey": "^2.6",
+    "mockery/mockery": "^1.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "EDDPaddle\\": "includes/"
+    }
+  },
+  "config": {
+    "allow-plugins": {
+      "composer/installers": true
+    }
+  }
+}

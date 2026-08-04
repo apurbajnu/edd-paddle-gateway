@@ -1,0 +1,14 @@
+/vendor/
+/.phpunit.result.cache
+/.vscode/
+/.idea/
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+
+# Build artifact (lives outside the plugin dir but ignore in case it lands here)
+/edd-paddle-gateway.zip
+/edd-paddle-gateway-free.zip
