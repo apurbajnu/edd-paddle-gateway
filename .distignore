@@ -1,0 +1,30 @@
+# Files & directories excluded from the distributable plugin zip.
+# Consumed by build.sh (and WP-CLI `wp dist-archive` if available).
+#
+# Vendor is excluded because the plugin's composer.json declares only
+# require-dev dependencies (PHPUnit, Brain Monkey, Mockery) — none of them
+# are needed at runtime. The plugin loads vendor/autoload.php ONLY when
+# PHPUNIT_COMPOSER_INSTALL is defined (i.e. never in production).
+
+.git
+.gitignore
+.distignore
+.github
+.vscode
+.idea
+.DS_Store
+
+# Dev tooling
+composer.json
+composer.lock
+phpunit.xml.dist
+.phpunit.result.cache
+build.sh
+tests/
+
+# Dev-only Composer dependencies (test framework)
+vendor/
+
+# Misc
+*.log
+*.tar.gz
