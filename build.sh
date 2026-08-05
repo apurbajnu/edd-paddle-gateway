@@ -10,14 +10,17 @@
 set -euo pipefail
 
 PLUGIN_SLUG="$(basename "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)")"
+# Main plugin file basename — must match the wp.org slug (edd-paddle-gateway.php),
+# not the dev folder name (which may have a -free suffix during development).
+PLUGIN_FILE="edd-paddle-gateway.php"
 PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGINS_PARENT="$(dirname "${PLUGIN_DIR}")"                            # .../wp-content/plugins  (zip runs here)
 SITE_ROOT="$(dirname "$(dirname "${PLUGINS_PARENT}")")"                # .../bestdecoders        (zip lands here)
 DIST_ZIP="${SITE_ROOT}/${PLUGIN_SLUG}.zip"
 
 # Sanity: plugin file present?
-if [ ! -f "${PLUGIN_DIR}/${PLUGIN_SLUG}.php" ]; then
-    echo "Error: ${PLUGIN_SLUG}.php not found in ${PLUGIN_DIR}" >&2
+if [ ! -f "${PLUGIN_DIR}/${PLUGIN_FILE}" ]; then
+    echo "Error: ${PLUGIN_FILE} not found in ${PLUGIN_DIR}" >&2
     exit 1
 fi
 
