@@ -1,0 +1,35 @@
+/**
+ * EDD Paddle Gateway - Admin Styles
+ *
+ * Forces the configure gear icon button to always be visible
+ * for the Paddle gateway row in the EDD Payment Gateways list.
+ * By default EDD hides it via CSS unless the parent has .edd-plugin__active,
+ * which is only set by the Extension Manager installer — not for third-party gateways.
+ */
+
+#edd-payment-gateways li[data-key="paddle"] .button.edd-settings__button-settings {
+    display: block;
+}
+
+/* Paddle sync status column on Downloads list table */
+.edd-paddle-status {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 5px;
+    border: 1px solid rgba(0,0,0,0.1);
+}
+.edd-paddle-status--synced {
+    background-color: #00a32a;
+    box-shadow: 0 0 2px #00a32a;
+}
+.edd-paddle-status--partial {
+    background-color: #dba617;
+    box-shadow: 0 0 2px #dba617;
+}
+.edd-paddle-status--none {
+    background-color: #ccd0d4;
+}
+
