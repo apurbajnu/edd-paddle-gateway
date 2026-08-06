@@ -171,10 +171,13 @@ if ( ! function_exists( 'edd_paddle_pii_keys' ) ) {
      * Array keys (lowercase) whose values are treated as PII for log redaction.
      * Covers Paddle Billing API fields + common WP/EDD user fields.
      *
+     * Filterable via 'edd_paddle_pii_keys' so add-ons can append their own
+     * sensitive keys (e.g. pro appends 'license_key' / 'license').
+     *
      * @return string[]
      */
     function edd_paddle_pii_keys() {
-        return [
+        $keys = [
             'email', 'mail', 'user_email',
             'name', 'first_name', 'last_name', 'full_name', 'customer_name', 'display_name',
             'phone', 'telephone', 'tel',
@@ -187,6 +190,13 @@ if ( ! function_exists( 'edd_paddle_pii_keys' ) ) {
             'date_of_birth', 'dob', 'ssn', 'tax_id', 'vat_number',
             'ip', 'ip_address', 'remote_ip',
         ];
+
+        /**
+         * Append additional keys whose values should be redacted from logs.
+         *
+         * @param string[] $keys Lowercase key names.
+         */
+        return apply_filters( 'edd_paddle_pii_keys', $keys );
     }
 }
 
