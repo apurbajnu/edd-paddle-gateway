@@ -176,5 +176,47 @@ class CheckoutTest extends TestCase {
 
         $this->assertStringContainsString('cdn.paddle.com/paddle/v2/paddle.js', $output, 'Interstitial must enqueue Paddle.js SDK.');
         $this->assertStringContainsString('txn_overlay123', $output, 'Interstitial must pass the transaction ID to Paddle.Checkout.open.');
+        // Redirect mode renders inline (embedded checkout on a dedicated page);
+        // pro's overlay mode is the one that uses displayMode:"overlay" (modal).
+        $this->assertStringContainsString('displayMode:"inline"', $output, 'Redirect-mode fallback must render inline, not overlay.');
+    }
+
+    public function test_interstitial_uses_inline_display_mode_when_requested() {
+        Functions\when('edd_get_option')->alias(function($key, $default = '') {
+            switch ($key) {
+                case 'edd_paddle_mode': return 'sandbox';
+                case 'edd_paddle_sandbox_client_token': return 'test_client_token';
+                default: return $default;
+            }
+        });
+        Functions\when('edd_get_checkout_uri')->justReturn('https://example.com/checkout');
+
+        require_once dirname(dirname(__DIR__)) . '/includes/class-edd-paddle-checkout.php';
+
+        ob_start();
+        edd_paddle_render_overlay_interstitial('txn_inline_test', 789, 'inline');
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('displayMode:"inline"', $output, 'Interstitial must honor explicit inline display mode.');
+        $this->assertStringNotContainsString('displayMode:"overlay"', $output, 'No overlay fallback when inline was requested.');
+    }
+
+    public function test_interstitial_defaults_to_overlay_display_mode() {
+        Functions\when('edd_get_option')->alias(function($key, $default = '') {
+            switch ($key) {
+                case 'edd_paddle_mode': return 'sandbox';
+                case 'edd_paddle_sandbox_client_token': return 'test_client_token';
+                default: return $default;
+            }
+        });
+        Functions\when('edd_get_checkout_uri')->justReturn('https://example.com/checkout');
+
+        require_once dirname(dirname(__DIR__)) . '/includes/class-edd-paddle-checkout.php';
+
+        ob_start();
+        edd_paddle_render_overlay_interstitial('txn_default_test', 789);
+        $output = ob_get_clean();
+
+        $this->assertStringContainsString('displayMode:"overlay"', $output, 'Default display mode must remain overlay for back-compat with overlay-mode callers.');
     }
 }

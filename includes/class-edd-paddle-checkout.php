@@ -287,7 +287,10 @@ function edd_paddle_process_purchase( $purchase_data ) {
             if ( function_exists( 'edd_empty_cart' ) ) {
                 edd_empty_cart();
             }
-            edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id );
+            // 'inline' embeds the checkout form on the interstitial page so
+            // buyers experience a dedicated checkout page (free-tier UX).
+            // Pro's overlay mode passes 'overlay' for the modal-over-cart flow.
+            edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, 'inline' );
             if ( ! defined( 'PHPUNIT_COMPOSER_INSTALL' ) ) {
                 exit;
             }
@@ -325,17 +328,22 @@ function edd_paddle_process_purchase( $purchase_data ) {
 add_action( 'edd_gateway_paddle', 'edd_paddle_process_purchase' );
 
 /**
- * Render the overlay interstitial page.
+ * Render the checkout interstitial page.
  *
  * Self-contained HTML page that loads the Paddle SDK, initializes it with the
- * configured client token, and opens Paddle.Checkout over the top of the page.
- * On completion, redirects to the success page; on close, returns to checkout.
+ * configured client token, and opens Paddle.Checkout. On completion, redirects
+ * to the success page; on close, returns to checkout.
  *
  * @param string $transaction_id Paddle transaction ID.
  * @param int    $payment_id     EDD payment ID.
+ * @param string $display_mode   Paddle.Checkout displayMode: 'overlay' (modal
+ *                               over the page, default) or 'inline' (embedded
+ *                               form on the page). Redirect-mode callers pass
+ *                               'inline' for a dedicated-page feel; overlay-mode
+ *                               callers use the default 'overlay' for the modal.
  * @return void
  */
-function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id ) {
+function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, $display_mode = 'overlay' ) {
     $mode    = function_exists( 'edd_get_option' ) ? edd_get_option( 'edd_paddle_mode', 'sandbox' ) : 'sandbox';
     $is_live = ( 'live' === $mode );
 
@@ -352,12 +360,22 @@ function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id ) 
 
     $checkout_url = function_exists( 'edd_get_checkout_uri' ) ? edd_get_checkout_uri() : home_url( '/' );
 
+    // Paddle.Checkout.open accepts displayMode "overlay" (modal) or "inline"
+    // (embedded in the page). Redirect-mode callers pass "inline" so buyers
+    // get a dedicated full-page checkout; overlay-mode callers use the
+    // default "overlay" so the modal appears over the cart page.
+    $allowed_modes = [ 'overlay', 'inline' ];
+    if ( ! in_array( $display_mode, $allowed_modes, true ) ) {
+        $display_mode = 'overlay';
+    }
+
     $paddle_env    = $is_live ? 'production' : 'sandbox';
     $env_set_js    = $is_live ? '' : 'Paddle.Environment.set(' . json_encode( $paddle_env ) . ');';
     $token_js      = json_encode( $client_token );
     $txn_js        = json_encode( $transaction_id );
     $success_js    = json_encode( $success_url );
     $checkout_js   = json_encode( $checkout_url );
+    $display_js    = json_encode( $display_mode );
 
     edd_paddle_log( 'Rendering overlay interstitial for transaction: ' . $transaction_id . ' | payment: ' . $payment_id );
 
@@ -380,7 +398,7 @@ function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id ) 
     echo 'if(event.name==="checkout.completed"){window.location.href=' . $success_js . ';}';
     echo 'else if(event.name==="checkout.closed"){window.location.href=' . $checkout_js . ';}';
     echo '}});';
-    echo 'Paddle.Checkout.open({transactionId:' . $txn_js . ',settings:{displayMode:"overlay",theme:"light",locale:"en"}});';
+    echo 'Paddle.Checkout.open({transactionId:' . $txn_js . ',settings:{displayMode:' . $display_js . ',theme:"light",locale:"en"}});';
     echo '</script></div></body></html>';
 }
 
