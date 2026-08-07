@@ -269,6 +269,31 @@ function edd_paddle_process_purchase( $purchase_data ) {
     $checkout_type = apply_filters( 'edd_paddle_checkout_mode', 'redirect' );
 
     if ( 'redirect' === $checkout_type && ! empty( $checkout_url ) ) {
+        // Paddle Billing v2 returns an overlay-style URL (on the merchant's
+        // own domain with ?_ptxn=) for accounts without Hosted Checkout
+        // approval. Redirecting to that URL would strand the buyer — no
+        // Paddle.js is loaded in redirect mode, so the modal never renders.
+        // Detect this configuration and render the interstitial (same path
+        // overlay mode uses) so checkout works regardless of dashboard setup.
+        $home_host      = wp_parse_url( home_url(), PHP_URL_HOST );
+        $url_host       = wp_parse_url( $checkout_url, PHP_URL_HOST );
+        $is_overlay_url = $home_host
+            && $url_host
+            && $home_host === $url_host
+            && false !== strpos( $checkout_url, '_ptxn=' );
+
+        if ( $is_overlay_url && ! empty( $transaction_id ) ) {
+            edd_paddle_log( 'Paddle returned overlay-style URL in redirect mode; rendering interstitial instead of redirecting.' );
+            if ( function_exists( 'edd_empty_cart' ) ) {
+                edd_empty_cart();
+            }
+            edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id );
+            if ( ! defined( 'PHPUNIT_COMPOSER_INSTALL' ) ) {
+                exit;
+            }
+            return;
+        }
+
         edd_paddle_log( 'Redirecting to Paddle checkout URL: ' . $checkout_url );
         wp_redirect( $checkout_url );
         if ( ! defined( 'PHPUNIT_COMPOSER_INSTALL' ) ) {
