@@ -87,12 +87,17 @@ class EDD_Paddle_API {
         if ( $response_code < 200 || $response_code >= 300 ) {
             $error_message = isset( $data['error']['detail'] ) ? $data['error']['detail'] : __( 'An error occurred during the API request.', 'edd-paddle-gateway' );
             $error_code    = isset( $data['error']['code'] ) ? $data['error']['code'] : 'paddle_api_error';
-            
+
             // Surface the error code/message at operational level (no PII), but
             // gate the full response body behind verbose mode — error bodies
             // can include customer email/PII from Paddle.
             edd_paddle_log( sprintf( 'Paddle API Error: %s | Code: %s | URL: %s', $error_message, $error_code, $url ) );
             edd_paddle_log_verbose( sprintf( 'Paddle API Error response body: %s', edd_paddle_redact_pii( $response_body ) ) );
+
+            // Always log full error details for debugging discount sync issues
+            if ( isset( $data['error'] ) ) {
+                edd_paddle_log( 'Paddle API Full Error Details: ' . wp_json_encode( $data['error'] ) );
+            }
 
             return new WP_Error( $error_code, $error_message, $data );
         }

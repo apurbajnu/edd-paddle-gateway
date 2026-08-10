@@ -83,6 +83,9 @@ function edd_paddle_build_transaction_payload( $purchase_data, $payment_id ) {
     ];
 
     // Handle Discounts
+    // Paddle API uses 'discount_id' (singular, top-level) to auto-apply
+    // a catalog discount to a transaction. The customer sees the discounted
+    // price at checkout without needing to enter the code.
     if ( ! empty( $purchase_data['user_info']['discount'] ) && 'none' !== $purchase_data['user_info']['discount'] ) {
         $discount_code = $purchase_data['user_info']['discount'];
         if ( function_exists( 'edd_get_discount_id_by_code' ) ) {
@@ -96,11 +99,7 @@ function edd_paddle_build_transaction_payload( $purchase_data, $payment_id ) {
                 }
 
                 if ( $paddle_discount_id ) {
-                    $payload['discounts'] = [
-                        [
-                            'id' => $paddle_discount_id,
-                        ],
-                    ];
+                    $payload['discount_id'] = $paddle_discount_id;
                 }
             }
         }
@@ -115,8 +114,12 @@ function edd_paddle_build_transaction_payload( $purchase_data, $payment_id ) {
  * @param int $discount_id The EDD discount ID.
  * @return string|bool Paddle Discount ID or false on failure.
  */
+if ( ! function_exists( 'edd_paddle_sync_discount' ) ) {
 function edd_paddle_sync_discount( $discount_id ) {
+    edd_paddle_log( '=== Starting discount sync for ID: ' . $discount_id . ' ===' );
+
     if ( ! class_exists( 'EDD_Discount' ) ) {
+        edd_paddle_log( 'EDD_Discount class not found' );
         return false;
     }
 
@@ -127,15 +130,19 @@ function edd_paddle_sync_discount( $discount_id ) {
     $type   = $discount->get_type(); // percentage or flat
 
     $paddle_body = [
-        'name'    => $discount->get_name(),
-        'code'    => $discount->get_code(),
         'type'    => ( 'flat' === $type ) ? 'flat' : 'percentage',
-        'amount'  => ( 'flat' === $type ) ? number_format( (float) $amount, 2, '', '' ) : (string) $amount,
-        'enabled' => true,
+        'code'    => strtoupper( $discount->get_code() ),
+        'amount'  => number_format( (float) $amount, 2, '.', '' ),
+        'description' => $discount->get_name(),
+        'enabled_for_checkout' => true,
+        'mode' => 'standard',
+        'recur' => false,
     ];
 
     if ( 'flat' === $type ) {
         $paddle_body['currency_code'] = function_exists( 'edd_get_currency' ) ? edd_get_currency() : 'USD';
+        // For flat discounts, convert to cents (smallest currency unit)
+        $paddle_body['amount'] = (string) ( (int) ( (float) $amount * 100 ) );
     }
 
     // Check if this discount was already synced to Paddle
@@ -143,37 +150,187 @@ function edd_paddle_sync_discount( $discount_id ) {
     $last_synced_hash   = get_post_meta( $discount_id, '_edd_paddle_discount_hash', true );
     $current_hash       = md5( serialize( $paddle_body ) );
 
+    edd_paddle_log( 'Discount sync check | Existing Paddle ID: ' . ( $existing_paddle_id ?: 'NONE' ) . ' | Hash match: ' . ( $last_synced_hash === $current_hash ? 'YES' : 'NO' ) );
+
     if ( $existing_paddle_id && $last_synced_hash === $current_hash ) {
         // Already synced and unchanged
+        edd_paddle_log( 'Discount already synced and unchanged, returning existing ID: ' . $existing_paddle_id );
         return $existing_paddle_id;
     }
 
     if ( $existing_paddle_id ) {
         // Discount was edited — update in Paddle
+        edd_paddle_log( 'Updating existing discount in Paddle | ID: ' . $existing_paddle_id );
         $response = $api->update_discount( $existing_paddle_id, $paddle_body );
 
         if ( is_wp_error( $response ) ) {
-            edd_paddle_log( 'Discount update failed: ' . $discount_id . ' | Error: ' . $response->get_error_message() );
+            $error_msg = $response->get_error_message();
+            edd_paddle_log( 'Discount update failed: ' . $discount_id . ' | Error: ' . $error_msg );
             // Fall through to try creating a new one
         } else {
             update_post_meta( $discount_id, '_edd_paddle_discount_hash', $current_hash );
+            edd_paddle_log( 'Discount updated successfully in Paddle | ID: ' . $existing_paddle_id );
             return $existing_paddle_id;
         }
     }
 
     // Create new discount in Paddle
+    edd_paddle_log( 'Creating new discount in Paddle | Payload: ' . json_encode( $paddle_body ) );
     $response = $api->create_discount( $paddle_body );
 
     if ( is_wp_error( $response ) ) {
-        edd_paddle_log( 'Discount sync failed: ' . $discount_id . ' | Error: ' . $response->get_error_message() );
+        $error_msg = $response->get_error_message();
+        edd_paddle_log( 'Discount sync failed: ' . $discount_id . ' | Error: ' . $error_msg );
+        // Store error in transient for display in admin notice
+        set_transient( 'edd_paddle_discount_sync_error_' . $discount_id, $error_msg, 60 );
         return false;
     }
 
     $paddle_id = $response['data']['id'];
     update_post_meta( $discount_id, 'edd_paddle_discount_id', $paddle_id );
     update_post_meta( $discount_id, '_edd_paddle_discount_hash', $current_hash );
+    edd_paddle_log( 'Discount created successfully in Paddle | Paddle ID: ' . $paddle_id );
 
     return $paddle_id;
+}
+} // end function_exists edd_paddle_sync_discount
+
+/**
+ * Show admin notice when discount sync fails
+ *
+ * @return void
+ */
+function edd_paddle_discount_sync_admin_notice() {
+    if ( ! isset( $_GET['edd_paddle_discount_sync_failed'] ) ) {
+        return;
+    }
+
+    $error_message = isset( $_GET['edd_paddle_error_msg'] ) ? sanitize_text_field( $_GET['edd_paddle_error_msg'] ) : 'Unknown error';
+    $message = sprintf( __( 'Discount failed to sync to Paddle. Error: %s. Please check your API settings and try syncing manually.', 'edd-paddle-gateway' ), $error_message );
+    ?>
+    <div class="notice notice-error is-dismissible">
+        <p><?php echo esc_html( $message ); ?></p>
+    </div>
+    <?php
+}
+add_action( 'admin_notices', 'edd_paddle_discount_sync_admin_notice' );
+
+/**
+ * Add Paddle sync column to discount list table
+ *
+ * @param array $columns Existing columns.
+ * @return array
+ */
+function edd_paddle_add_discount_sync_column( $columns ) {
+    $columns['paddle_sync'] = __( 'Paddle Sync', 'edd-paddle-gateway' );
+    return $columns;
+}
+
+/**
+ * Render Paddle sync status in discount list table
+ *
+ * @param int    $discount_id Discount ID.
+ * @param object $discount Discount object.
+ * @return void
+ */
+function edd_paddle_render_discount_sync_column( $discount_id, $discount ) {
+    $paddle_discount_id = get_post_meta( $discount_id, 'edd_paddle_discount_id', true );
+
+    if ( empty( $paddle_discount_id ) ) {
+        echo '<span class="edd-paddle-status edd-paddle-status--none"></span> ' . esc_html__( 'Not synced', 'edd-paddle-gateway' );
+    } else {
+        echo '<span class="edd-paddle-status edd-paddle-status--synced"></span> ' . esc_html__( 'Synced', 'edd-paddle-gateway' );
+    }
+}
+
+/**
+ * Sync discount to Paddle when created in EDD admin
+ *
+ * @param array $args Discount arguments.
+ * @param int   $discount_id Discount ID.
+ * @return void
+ */
+function edd_paddle_sync_discount_on_create( $args, $discount_id ) {
+    if ( ! empty( $discount_id ) ) {
+        edd_paddle_log( 'Discount creation triggered for ID: ' . $discount_id . ' | AJAX: ' . ( wp_doing_ajax() ? 'YES' : 'NO' ) );
+        $result = edd_paddle_sync_discount( $discount_id );
+        if ( ! $result ) {
+            edd_paddle_log( 'Discount sync FAILED for ID: ' . $discount_id );
+            if ( ! wp_doing_ajax() ) {
+                $error_msg = get_transient( 'edd_paddle_discount_sync_error_' . $discount_id );
+                $redirect_args = [
+                    'edd_paddle_discount_sync_failed' => '1',
+                ];
+                if ( $error_msg ) {
+                    $redirect_args['edd_paddle_error_msg'] = urlencode( $error_msg );
+                }
+                $redirect = add_query_arg( $redirect_args, wp_get_referer() );
+                wp_safe_redirect( $redirect );
+                exit;
+            }
+        } else {
+            edd_paddle_log( 'Discount sync SUCCESS for ID: ' . $discount_id );
+        }
+    }
+}
+
+/**
+ * Sync discount to Paddle when updated in EDD admin
+ *
+ * @param array $args Discount arguments.
+ * @param int   $discount_id Discount ID.
+ * @return void
+ */
+function edd_paddle_sync_discount_on_update( $args, $discount_id ) {
+    if ( ! empty( $discount_id ) ) {
+        edd_paddle_log( 'Discount update triggered for ID: ' . $discount_id . ' | AJAX: ' . ( wp_doing_ajax() ? 'YES' : 'NO' ) );
+        $result = edd_paddle_sync_discount( $discount_id );
+        if ( ! $result ) {
+            edd_paddle_log( 'Discount sync FAILED for ID: ' . $discount_id );
+            if ( ! wp_doing_ajax() ) {
+                $error_msg = get_transient( 'edd_paddle_discount_sync_error_' . $discount_id );
+                $redirect_args = [
+                    'edd_paddle_discount_sync_failed' => '1',
+                ];
+                if ( $error_msg ) {
+                    $redirect_args['edd_paddle_error_msg'] = urlencode( $error_msg );
+                }
+                $redirect = add_query_arg( $redirect_args, wp_get_referer() );
+                wp_safe_redirect( $redirect );
+                exit;
+            }
+        } else {
+            edd_paddle_log( 'Discount sync SUCCESS for ID: ' . $discount_id );
+        }
+    }
+}
+
+/**
+ * Register discount sync hooks (Pro-only feature).
+ *
+ * The sync functions are defined in free so Pro can call them, but the
+ * auto-sync hooks that fire on discount create/update — plus the admin UI
+ * (sync column, admin notices) — only register when the Pro add-on is active.
+ * Pro fires 'edd_paddle_pro_loaded' at the end of its bootstrap.
+ *
+ * @return void
+ */
+function edd_paddle_register_discount_sync_hooks() {
+    // Auto-sync when discounts are created or updated in EDD admin
+    add_action( 'edd_post_insert_discount', 'edd_paddle_sync_discount_on_create', 10, 2 );
+    add_action( 'edd_post_update_discount', 'edd_paddle_sync_discount_on_update', 10, 2 );
+
+    // Admin UI: sync status column and failure notices
+    add_filter( 'edd_discount_list_columns', 'edd_paddle_add_discount_sync_column' );
+    add_action( 'edd_discount_table_row', 'edd_paddle_render_discount_sync_column', 10, 2 );
+}
+
+// Only register discount sync hooks when Pro add-on is active.
+// Pro fires 'edd_paddle_pro_loaded' once its classes are loaded and hooked.
+if ( did_action( 'edd_paddle_pro_loaded' ) ) {
+    edd_paddle_register_discount_sync_hooks();
+} else {
+    add_action( 'edd_paddle_pro_loaded', 'edd_paddle_register_discount_sync_hooks' );
 }
 
 /**
@@ -254,6 +411,19 @@ function edd_paddle_process_purchase( $purchase_data ) {
     $checkout_url = isset( $response['data']['checkout']['url'] ) ? $response['data']['checkout']['url'] : '';
     $transaction_id = isset( $response['data']['id'] ) ? $response['data']['id'] : '';
 
+    // Auto-apply discount code in Paddle checkout by appending to URL.
+    // Paddle's transaction 'discounts' field makes the code available, but
+    // the customer still has to enter it. Passing discount_code as a query
+    // parameter pre-fills and auto-applies it in the Paddle checkout form.
+    $discount_code = '';
+    if ( ! empty( $purchase_data['user_info']['discount'] ) && 'none' !== $purchase_data['user_info']['discount'] ) {
+        $discount_code = strtoupper( $purchase_data['user_info']['discount'] );
+        if ( ! empty( $checkout_url ) ) {
+            $checkout_url = add_query_arg( 'discount_code', $discount_code, $checkout_url );
+            edd_paddle_log( 'Appended discount code to checkout URL: ' . $discount_code );
+        }
+    }
+
     if ( ! empty( $transaction_id ) ) {
         if ( function_exists( 'edd_set_payment_transaction_id' ) ) {
             edd_set_payment_transaction_id( $payment_id, $transaction_id );
@@ -290,7 +460,7 @@ function edd_paddle_process_purchase( $purchase_data ) {
             // 'inline' embeds the checkout form on the interstitial page so
             // buyers experience a dedicated checkout page (free-tier UX).
             // Pro's overlay mode passes 'overlay' for the modal-over-cart flow.
-            edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, 'inline' );
+            edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, 'inline', $discount_code );
             if ( ! defined( 'PHPUNIT_COMPOSER_INSTALL' ) ) {
                 exit;
             }
@@ -320,7 +490,7 @@ function edd_paddle_process_purchase( $purchase_data ) {
         edd_empty_cart();
     }
 
-    edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id );
+    edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, 'overlay', $discount_code );
     if ( ! defined( 'PHPUNIT_COMPOSER_INSTALL' ) ) {
         exit;
     }
@@ -343,7 +513,7 @@ add_action( 'edd_gateway_paddle', 'edd_paddle_process_purchase' );
  *                               callers use the default 'overlay' for the modal.
  * @return void
  */
-function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, $display_mode = 'overlay' ) {
+function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, $display_mode = 'overlay', $discount_code = '' ) {
     $mode    = function_exists( 'edd_get_option' ) ? edd_get_option( 'edd_paddle_mode', 'sandbox' ) : 'sandbox';
     $is_live = ( 'live' === $mode );
 
@@ -376,8 +546,9 @@ function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, $
     $success_js    = json_encode( $success_url );
     $checkout_js   = json_encode( $checkout_url );
     $display_js    = json_encode( $display_mode );
+    $discount_js   = json_encode( $discount_code );
 
-    edd_paddle_log( 'Rendering overlay interstitial for transaction: ' . $transaction_id . ' | payment: ' . $payment_id );
+    edd_paddle_log( 'Rendering overlay interstitial for transaction: ' . $transaction_id . ' | payment: ' . $payment_id . ' | discount: ' . ( $discount_code ?: 'none' ) );
 
     $title = esc_html__( 'Secure Checkout', 'edd-paddle-gateway' );
     $head  = esc_html__( 'Opening secure checkout...', 'edd-paddle-gateway' );
@@ -398,6 +569,9 @@ function edd_paddle_render_overlay_interstitial( $transaction_id, $payment_id, $
     echo 'if(event.name==="checkout.completed"){window.location.href=' . $success_js . ';}';
     echo 'else if(event.name==="checkout.closed"){window.location.href=' . $checkout_js . ';}';
     echo '}});';
+    // Discount is already added to the transaction via the 'discounts' field.
+    // Paddle auto-applies transaction discounts at checkout - no need to pass
+    // discountCode in settings (that's not a valid Paddle.Checkout.open setting).
     echo 'Paddle.Checkout.open({transactionId:' . $txn_js . ',settings:{displayMode:' . $display_js . ',theme:"light",locale:"en"}});';
     echo '</script></div></body></html>';
 }

@@ -154,9 +154,9 @@ class CheckoutEdgeCasesTest extends TestCase {
 
         $payload = edd_paddle_build_transaction_payload($purchase_data, 503);
 
-        $this->assertArrayHasKey('discounts', $payload);
-        $this->assertCount(1, $payload['discounts']);
-        $this->assertEquals('dsc_paddle_20', $payload['discounts'][0]['id']);
+        // Paddle API uses 'discount_id' (singular) to auto-apply catalog discounts
+        $this->assertArrayHasKey('discount_id', $payload);
+        $this->assertEquals('dsc_paddle_20', $payload['discount_id']);
     }
 
     public function test_build_payload_no_discount_when_none_applied() {
@@ -183,7 +183,7 @@ class CheckoutEdgeCasesTest extends TestCase {
 
         $payload = edd_paddle_build_transaction_payload($purchase_data, 504);
 
-        $this->assertArrayNotHasKey('discounts', $payload);
+        $this->assertArrayNotHasKey('discount_id', $payload);
     }
 
     public function test_build_payload_skips_download_without_price_id() {
