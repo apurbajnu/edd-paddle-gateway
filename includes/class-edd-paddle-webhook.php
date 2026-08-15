@@ -108,7 +108,9 @@ if ( ! function_exists( 'edd_paddle_process_webhook_payload' ) ) {
         $data           = $payload['data'];
         $event_type     = $payload['event_type'];
 
-        $transaction_id = $data['id'];
+        // For adjustment events, $data['id'] is the adjustment_id. The transaction_id is at $data['transaction_id'].
+        $is_adjustment  = ( 0 === strpos( $event_type, 'adjustment.' ) );
+        $transaction_id = $is_adjustment && isset( $data['transaction_id'] ) ? $data['transaction_id'] : $data['id'];
         $status         = isset( $data['status'] ) ? $data['status'] : '';
 
         edd_paddle_log( 'Webhook: Transaction ID: ' . $transaction_id . ' | Status: ' . $status );
@@ -121,16 +123,31 @@ if ( ! function_exists( 'edd_paddle_process_webhook_payload' ) ) {
             return;
         }
 
+        // For adjustment.* events (refunds), custom_data doesn't exist.
+        // Pro handler will find payment by transaction_id instead.
         $payment_id = isset( $data['custom_data']['edd_payment_id'] ) ? (int) $data['custom_data']['edd_payment_id'] : 0;
 
-        if ( ! $payment_id ) {
+        if ( ! $payment_id && ! $is_adjustment ) {
             edd_paddle_log( 'Webhook: Missing edd_payment_id in custom_data. Transaction: ' . $transaction_id );
             // custom_data is buyer-extensible — could include PII. Verbose + redacted.
             edd_paddle_log_verbose( 'Webhook: Custom data was: ' . print_r( edd_paddle_redact_pii( isset( $data['custom_data'] ) ? $data['custom_data'] : 'not set' ), true ) );
             return;
         }
 
-        edd_paddle_log( 'Webhook: Found payment_id: ' . $payment_id . ' | transaction_id: ' . $transaction_id );
+        // For adjustments, log that we're passing to Pro handler without payment_id
+        if ( $is_adjustment ) {
+            edd_paddle_log( 'Webhook: Adjustment event, passing to Pro handler for payment lookup via transaction_id.' );
+        } else {
+            edd_paddle_log( 'Webhook: Found payment_id: ' . $payment_id . ' | transaction_id: ' . $transaction_id );
+        }
+
+        // For adjustment.* events, skip all transaction-specific processing and pass
+        // directly to Pro handler which will find payment by transaction_id
+        if ( $is_adjustment ) {
+            do_action( 'edd_paddle_webhook_event', $event_type, $data, 0 );
+            edd_paddle_log( 'Webhook ======================================' );
+            return;
+        }
 
         // Mark webhook as received (for polling to detect)
         update_post_meta( $payment_id, '_edd_paddle_webhook_received', current_time( 'mysql' ) );
