@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: PHPUnit (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Run tests
+        run: vendor/bin/phpunit
+
+  lint:
+    name: PHP Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Lint all PHP files
+        run: find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n 1 -P 4 php -l
+
+  build:
+    name: Build zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build distributable zip
+        run: bash build.sh
+
+      - name: Verify zip contents
+        run: |
+          unzip -l edd-paddle-gateway.zip | grep -v -E 'vendor/|\.git/|tests/|composer\.(json|lock)|build\.sh|phpunit|\.distignore|\.github' > /dev/null
+          if unzip -l edd-paddle-gateway.zip | grep -E 'vendor/|\.git/|tests/|composer\.lock|build\.sh|phpunit'; then
+            echo "::error::Dev artifacts leaked into the dist zip"
+            exit 1
+          fi
+          echo "Zip is clean"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edd-paddle-gateway
+          path: edd-paddle-gateway.zip
