@@ -4,7 +4,7 @@
 # Excludes dev-only artifacts (.git, tests, vendor, IDE configs, *.log) so
 # buyers get a lean plugin package (~tens of KB instead of multi-MB).
 #
-# Output: ../edd-paddle-gateway-free.zip (next to the plugin folder)
+# Output: ../edd-paddle-gateway.zip (next to the plugin folder)
 # When the user renames this folder to edd-paddle-gateway/ for wp.org
 # submission, the slug + zip name follow automatically.
 set -euo pipefail
